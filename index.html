@@ -29,12 +29,12 @@
         .control-group {
             display: flex;
             align-items: center;
-            gap: 10px;
+            gap: 8px;
             font-size: 16px;
             color: #c5c6c7;
         }
 
-        select, button, .file-upload-btn {
+        select, button, .file-upload-btn, input[type="number"] {
             background-color: #1f2833;
             color: #66fcf1;
             border: 2px solid #45a29e;
@@ -47,8 +47,24 @@
             transition: all 0.2s;
         }
 
-        select:focus, button:hover, .file-upload-btn:hover {
+        input[type="number"] {
+            width: 60px;
+            text-align: center;
+            cursor: text;
+        }
+
+        input[type="number"]::placeholder {
+            color: #66fcf1;
+            opacity: 0.7;
+        }
+
+        select:focus, button:hover, .file-upload-btn:hover, input[type="number"]:focus {
             background-color: #45a29e;
+            color: #0b0c10;
+            outline: none;
+        }
+
+        input[type="number"]:focus::placeholder {
             color: #0b0c10;
         }
 
@@ -87,15 +103,29 @@
         <div class="control-group">
             <label for="speedSelect">Speed:</label>
             <select id="speedSelect">
-                <!-- Default is the slowest -->
-                <option value="0.5" selected>Slowest (Beginner)</option>
+                <!-- Extremely slow for beginners -->
+                <option value="0.2" selected>Slowest</option>
+                <option value="0.5">Slow</option>
                 <option value="1">Normal</option>
                 <option value="1.5">Fast</option>
                 <option value="2.5">Extreme</option>
             </select>
         </div>
         <div class="control-group">
-            <label for="csvUpload" class="file-upload-btn">Import Vocab (CSV)</label>
+            <label for="livesSelect">Lives:</label>
+            <select id="livesSelect">
+                <option value="3">3</option>
+                <option value="5" selected>5</option>
+                <option value="10">10</option>
+                <option value="99">99</option>
+            </select>
+        </div>
+        <div class="control-group">
+            <label for="timeInput">Time (min):</label>
+            <input type="number" id="timeInput" min="1" step="1" placeholder="∞">
+        </div>
+        <div class="control-group">
+            <label for="csvUpload" class="file-upload-btn">Import (CSV)</label>
             <input type="file" id="csvUpload" accept=".csv" style="display: none;">
         </div>
         <div class="control-group">
@@ -106,6 +136,7 @@
     <!-- Game Info -->
     <div id="ui-container">
         <div>Score: <span id="score">0</span></div>
+        <div>Time: <span id="timerDisplay">∞</span> ⏳</div>
         <div>Lives: <span id="lives">5</span> ❤️</div>
     </div>
 
@@ -122,22 +153,29 @@
         const ctx = canvas.getContext('2d');
         const scoreElement = document.getElementById('score');
         const livesElement = document.getElementById('lives');
+        const timerElement = document.getElementById('timerDisplay');
 
         // --- Game State ---
         let score = 0;
-        let lives = 5;
+        let initialLives = 5;
+        let lives = initialLives;
         let gameOver = false;
         let gameTime = 0; 
-        let speedMultiplier = 0.5; // Default to 0.5 (slowest)
+        let speedMultiplier = 0.2; // Default to 0.2 (slowest)
         let animationId; // For requestAnimationFrame
+
+        // Timer variables
+        let isUnlimited = true;
+        let timeRemaining = 0; // in milliseconds
+        let lastFrameTime = 0;
 
         // --- Default Vocabulary ---
         let vocabList = [
-            { en: 'apple', hint: 'Apple' }, { en: 'dog', hint: 'Dog' }, { en: 'cat', hint: 'Cat' },
-            { en: 'book', hint: 'Book' }, { en: 'sun', hint: 'Sun' }, { en: 'moon', hint: 'Moon' },
-            { en: 'water', hint: 'Water' }, { en: 'fire', hint: 'Fire' }, { en: 'tree', hint: 'Tree' },
-            { en: 'bird', hint: 'Bird' }, { en: 'fish', hint: 'Fish' }, { en: 'car', hint: 'Car' },
-            { en: 'school', hint: 'School' }, { en: 'happy', hint: 'Happy' }, { en: 'play', hint: 'Play' }
+            { en: 'apple', zh: '蘋果' }, { en: 'dog', zh: '狗' }, { en: 'cat', zh: '貓' },
+            { en: 'book', zh: '書本' }, { en: 'sun', zh: '太陽' }, { en: 'moon', zh: '月亮' },
+            { en: 'water', zh: '水' }, { en: 'fire', zh: '火' }, { en: 'tree', zh: '樹木' },
+            { en: 'bird', zh: '鳥' }, { en: 'fish', zh: '魚' }, { en: 'car', zh: '車子' },
+            { en: 'school', zh: '學校' }, { en: 'happy', zh: '快樂' }, { en: 'play', zh: '玩耍' }
         ];
 
         // --- Import CSV Feature ---
@@ -160,10 +198,10 @@
                     // Ensure at least word (col 0) and hint (col 2) exist
                     if (cols.length >= 3) {
                         const en = cols[0].trim().toLowerCase();
-                        const hint = cols[2].trim();
+                        const zh = cols[2].trim();
                         // Ensure english field is not empty
-                        if (en && hint) {
-                            newVocab.push({ en: en, hint: hint });
+                        if (en && zh) {
+                            newVocab.push({ en: en, zh: zh });
                         }
                     }
                 }
@@ -182,13 +220,20 @@
             reader.readAsText(file);
         });
 
-        // --- Speed Selection ---
+        // --- Selectors/Inputs ---
         document.getElementById('speedSelect').addEventListener('change', (e) => {
             speedMultiplier = parseFloat(e.target.value);
-            // Speed change applies to newly spawned words immediately without resetting
         });
 
-        // --- Restart Button ---
+        document.getElementById('livesSelect').addEventListener('change', (e) => {
+            initialLives = parseInt(e.target.value);
+            resetGame(); // Restart game to apply new lives immediately
+        });
+
+        document.getElementById('timeInput').addEventListener('change', () => {
+            resetGame(); // Restart game to apply the newly selected time limit
+        });
+
         document.getElementById('restartBtn').addEventListener('click', () => {
             resetGame();
         });
@@ -216,15 +261,16 @@
             constructor() {
                 const randomVocab = vocabList[Math.floor(Math.random() * vocabList.length)];
                 this.text = randomVocab.en;
-                this.hint = randomVocab.hint;
+                this.zh = randomVocab.zh;
                 this.x = Math.random() * (canvas.width - 200) + 100; 
                 this.y = -50;
                 
-                // Adjust falling speed based on multiplier
-                const baseSpeed = 0.4 * speedMultiplier;
+                // Adjust falling speed based on multiplier.
+                const baseSpeed = 0.5 * speedMultiplier;
                 const timeFactor = (gameTime / 150000) * speedMultiplier;
                 const randomFactor = Math.random() * 0.5 * speedMultiplier;
-                this.speed = baseSpeed + timeFactor + randomFactor;
+                // Minimum speed constraint so it doesn't completely stop
+                this.speed = Math.max(baseSpeed + timeFactor + randomFactor, 0.1);
                 
                 this.typedIndex = 0;
                 
@@ -248,9 +294,10 @@
                 ctx.stroke();
 
                 ctx.fillStyle = '#c5c6c7';
-                ctx.font = '18px Arial';
+                // Using fonts that support Chinese characters
+                ctx.font = '18px "Microsoft JhengHei", Arial, sans-serif'; 
                 ctx.textAlign = 'center';
-                ctx.fillText(this.hint, this.x + this.width / 2, this.y - 20);
+                ctx.fillText(this.zh, this.x + this.width / 2, this.y - 20);
 
                 ctx.font = 'bold 28px Courier New';
                 ctx.textAlign = 'left';
@@ -360,17 +407,41 @@
             ctx.globalAlpha = 1;
         }
 
+        function updateTimerDisplay() {
+            if (isUnlimited) {
+                timerElement.innerText = '∞';
+            } else {
+                const totalSeconds = Math.max(0, Math.ceil(timeRemaining / 1000));
+                const minutes = Math.floor(totalSeconds / 60);
+                const seconds = totalSeconds % 60;
+                timerElement.innerText = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+            }
+        }
+
+        let lastSpawnTime = 0;
+
         function resetGame() {
             cancelAnimationFrame(animationId);
             score = 0;
-            lives = 5;
+            lives = initialLives;
             gameTime = 0;
             gameOver = false;
             activeWords = [];
             particles = [];
             lasers = [];
             targetedWord = null;
-            lastSpawnTime = performance.now(); // Reset spawn time
+            lastFrameTime = 0;
+            
+            // Setup Timer
+            const timeValue = parseFloat(document.getElementById('timeInput').value);
+            if (!isNaN(timeValue) && timeValue > 0) {
+                isUnlimited = false;
+                timeRemaining = timeValue * 60 * 1000;
+            } else {
+                isUnlimited = true;
+                timeRemaining = 0;
+            }
+            updateTimerDisplay();
             
             scoreElement.innerText = score;
             livesElement.innerText = lives;
@@ -378,15 +449,16 @@
             animationId = requestAnimationFrame(gameLoop);
         }
 
-        function endGame() {
+        function endGame(isTimeUp = false) {
             gameOver = true;
             ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
             ctx.fillRect(0, 0, canvas.width, canvas.height);
             
-            ctx.fillStyle = '#e94560';
+            ctx.fillStyle = isTimeUp ? '#66fcf1' : '#e94560';
             ctx.font = 'bold 60px Arial';
             ctx.textAlign = 'center';
-            ctx.fillText('GAME OVER', canvas.width / 2, canvas.height / 2 - 20);
+            const endMessage = isTimeUp ? 'TIME IS UP!' : 'GAME OVER';
+            ctx.fillText(endMessage, canvas.width / 2, canvas.height / 2 - 20);
             
             ctx.fillStyle = '#ffffff';
             ctx.font = '24px Arial';
@@ -395,20 +467,35 @@
         }
 
         // --- Game Loop ---
-        let lastSpawnTime = 0;
-        
         function gameLoop(timestamp) {
             if (gameOver) return;
 
-            gameTime += 16; 
+            if (!lastFrameTime) lastFrameTime = timestamp;
+            const deltaTime = timestamp - lastFrameTime;
+            lastFrameTime = timestamp;
+
+            gameTime += deltaTime; 
             ctx.clearRect(0, 0, canvas.width, canvas.height);
 
             drawBackground();
 
-            // Word spawn interval affected by speed selection
-            let spawnInterval = 3000 / speedMultiplier;
+            // Timer countdown
+            if (!isUnlimited) {
+                timeRemaining -= deltaTime;
+                updateTimerDisplay();
+                
+                if (timeRemaining <= 0) {
+                    timeRemaining = 0;
+                    updateTimerDisplay();
+                    endGame(true); // true indicates end caused by time out
+                    return;
+                }
+            }
 
-            if (timestamp - lastSpawnTime > spawnInterval) {
+            // More balanced spawn interval that doesn't get ridiculously long on slow speeds
+            let spawnInterval = 1500 + (1 / speedMultiplier) * 800;
+
+            if (timestamp - lastSpawnTime > spawnInterval || activeWords.length === 0) {
                 activeWords.push(new FallingWord());
                 lastSpawnTime = timestamp;
             }
@@ -430,7 +517,7 @@
                     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
                     if (lives <= 0) {
-                        endGame();
+                        endGame(false);
                         return; // Exit current loop when game is over
                     }
                 }
