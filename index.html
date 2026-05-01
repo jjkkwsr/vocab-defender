@@ -579,8 +579,50 @@
             }
         });
 
+        // --- Auto-Load Default CSV ---
+        async function loadDefaultVocabulary() {
+            try {
+                const response = await fetch('cambridge_vocab-starter.csv');
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                const text = await response.text();
+                const lines = text.split(/\r?\n/);
+                const newVocab = [];
+
+                // Read from the second line (skip headers)
+                for (let i = 1; i < lines.length; i++) {
+                    const line = lines[i];
+                    if (!line.trim()) continue;
+
+                    const cols = line.split(',');
+                    if (cols.length >= 3) {
+                        const en = cols[0].trim().toLowerCase();
+                        const zh = cols[2].trim();
+                        if (en && zh) {
+                            newVocab.push({ en: en, zh: zh });
+                        }
+                    }
+                }
+
+                if (newVocab.length > 0) {
+                    vocabList = newVocab;
+                    console.log(`Successfully loaded ${newVocab.length} words from cambridge_vocab-starter.csv`);
+                    resetGame(); // Restart to apply the new list immediately
+                }
+            } catch (error) {
+                console.warn("Could not load default CSV (Make sure you are running a local server like Live Server, or hosted on GitHub Pages). Using fallback vocabulary.", error);
+            }
+        }
+
         // Start Game
-        animationId = requestAnimationFrame(gameLoop);
+        // We set lastSpawnTime to -9999 so the first frame triggers a word drop instantly
+        lastSpawnTime = -9999;
+        
+        // Attempt to load the CSV first. Once done (or failed), start the game loop.
+        loadDefaultVocabulary().finally(() => {
+            animationId = requestAnimationFrame(gameLoop);
+        });
 
     </script>
 </body>
