@@ -3,11 +3,498 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Web Game Development</title>
+    <title>Vocab Defender</title>
+    <style>
+        body {
+            margin: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            background-color: #0b0c10;
+            height: 100vh;
+            color: white;
+            font-family: 'Comic Sans MS', Arial, sans-serif;
+            overflow: hidden;
+            flex-direction: column;
+        }
+
+        #top-controls {
+            width: 800px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+
+        .control-group {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 16px;
+            color: #c5c6c7;
+        }
+
+        select, button, .file-upload-btn {
+            background-color: #1f2833;
+            color: #66fcf1;
+            border: 2px solid #45a29e;
+            padding: 6px 12px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 15px;
+            font-weight: bold;
+            font-family: Arial, sans-serif;
+            transition: all 0.2s;
+        }
+
+        select:focus, button:hover, .file-upload-btn:hover {
+            background-color: #45a29e;
+            color: #0b0c10;
+        }
+
+        #ui-container {
+            width: 800px;
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 10px;
+            font-size: 24px;
+            font-weight: bold;
+            color: #66fcf1;
+            text-shadow: 0 0 10px #45a29e;
+        }
+
+        canvas {
+            background: linear-gradient(to bottom, #0b0c10 0%, #1f2833 100%);
+            border: 4px solid #45a29e;
+            border-radius: 15px;
+            box-shadow: 0 0 30px rgba(102, 252, 241, 0.3);
+            cursor: none; /* Hide cursor for immersion */
+        }
+
+        #instructions {
+            margin-top: 15px;
+            color: #c5c6c7;
+            text-align: center;
+            font-size: 16px;
+            line-height: 1.5;
+        }
+    </style>
 </head>
 <body>
-    <div id="game-container">
-        <h1>Welcome to the Game!</h1>
+
+    <!-- Top Control Panel -->
+    <div id="top-controls">
+        <div class="control-group">
+            <label for="speedSelect">Speed:</label>
+            <select id="speedSelect">
+                <!-- Default is the slowest -->
+                <option value="0.5" selected>Slowest (Beginner)</option>
+                <option value="1">Normal</option>
+                <option value="1.5">Fast</option>
+                <option value="2.5">Extreme</option>
+            </select>
+        </div>
+        <div class="control-group">
+            <label for="csvUpload" class="file-upload-btn">Import Vocab (CSV)</label>
+            <input type="file" id="csvUpload" accept=".csv" style="display: none;">
+        </div>
+        <div class="control-group">
+            <button id="restartBtn">Restart</button>
+        </div>
     </div>
+
+    <!-- Game Info -->
+    <div id="ui-container">
+        <div>Score: <span id="score">0</span></div>
+        <div>Lives: <span id="lives">5</span> ❤️</div>
+    </div>
+
+    <!-- Game Canvas -->
+    <canvas id="gameCanvas" width="800" height="600"></canvas>
+
+    <div id="instructions">
+        Type the letters on your keyboard to shoot lasers!<br>
+        (Make sure your keyboard is set to English)
+    </div>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const scoreElement = document.getElementById('score');
+        const livesElement = document.getElementById('lives');
+
+        // --- Game State ---
+        let score = 0;
+        let lives = 5;
+        let gameOver = false;
+        let gameTime = 0; 
+        let speedMultiplier = 0.5; // Default to 0.5 (slowest)
+        let animationId; // For requestAnimationFrame
+
+        // --- Default Vocabulary ---
+        let vocabList = [
+            { en: 'apple', hint: 'Apple' }, { en: 'dog', hint: 'Dog' }, { en: 'cat', hint: 'Cat' },
+            { en: 'book', hint: 'Book' }, { en: 'sun', hint: 'Sun' }, { en: 'moon', hint: 'Moon' },
+            { en: 'water', hint: 'Water' }, { en: 'fire', hint: 'Fire' }, { en: 'tree', hint: 'Tree' },
+            { en: 'bird', hint: 'Bird' }, { en: 'fish', hint: 'Fish' }, { en: 'car', hint: 'Car' },
+            { en: 'school', hint: 'School' }, { en: 'happy', hint: 'Happy' }, { en: 'play', hint: 'Play' }
+        ];
+
+        // --- Import CSV Feature ---
+        document.getElementById('csvUpload').addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = function(event) {
+                const text = event.target.result;
+                const lines = text.split(/\r?\n/);
+                const newVocab = [];
+
+                // Read from the second line (skip headers)
+                for (let i = 1; i < lines.length; i++) {
+                    const line = lines[i];
+                    if (!line.trim()) continue;
+
+                    const cols = line.split(',');
+                    // Ensure at least word (col 0) and hint (col 2) exist
+                    if (cols.length >= 3) {
+                        const en = cols[0].trim().toLowerCase();
+                        const hint = cols[2].trim();
+                        // Ensure english field is not empty
+                        if (en && hint) {
+                            newVocab.push({ en: en, hint: hint });
+                        }
+                    }
+                }
+
+                if (newVocab.length > 0) {
+                    vocabList = newVocab;
+                    alert(`Successfully imported ${newVocab.length} words! Game will restart now.`);
+                    resetGame();
+                } else {
+                    alert('Import failed. Please check if the CSV format is correct.');
+                }
+                
+                // Reset input value to allow importing the same file again
+                document.getElementById('csvUpload').value = '';
+            };
+            reader.readAsText(file);
+        });
+
+        // --- Speed Selection ---
+        document.getElementById('speedSelect').addEventListener('change', (e) => {
+            speedMultiplier = parseFloat(e.target.value);
+            // Speed change applies to newly spawned words immediately without resetting
+        });
+
+        // --- Restart Button ---
+        document.getElementById('restartBtn').addEventListener('click', () => {
+            resetGame();
+        });
+
+
+        // --- Object Arrays ---
+        let activeWords = [];
+        let particles = [];
+        let lasers = [];
+        let stars = [];
+        let targetedWord = null;
+
+        // Initialize background stars
+        for (let i = 0; i < 100; i++) {
+            stars.push({
+                x: Math.random() * canvas.width,
+                y: Math.random() * canvas.height,
+                size: Math.random() * 2,
+                speed: Math.random() * 0.5 + 0.1
+            });
+        }
+
+        // --- Class Definitions ---
+        class FallingWord {
+            constructor() {
+                const randomVocab = vocabList[Math.floor(Math.random() * vocabList.length)];
+                this.text = randomVocab.en;
+                this.hint = randomVocab.hint;
+                this.x = Math.random() * (canvas.width - 200) + 100; 
+                this.y = -50;
+                
+                // Adjust falling speed based on multiplier
+                const baseSpeed = 0.4 * speedMultiplier;
+                const timeFactor = (gameTime / 150000) * speedMultiplier;
+                const randomFactor = Math.random() * 0.5 * speedMultiplier;
+                this.speed = baseSpeed + timeFactor + randomFactor;
+                
+                this.typedIndex = 0;
+                
+                ctx.font = 'bold 28px Courier New';
+                this.width = ctx.measureText(this.text).width;
+            }
+
+            draw() {
+                const isTargeted = targetedWord === this;
+                const opacity = (targetedWord && !isTargeted) ? 0.3 : 1;
+
+                ctx.save();
+                ctx.globalAlpha = opacity;
+
+                ctx.fillStyle = 'rgba(31, 40, 51, 0.8)';
+                ctx.beginPath();
+                ctx.roundRect(this.x - 20, this.y - 45, this.width + 40, 60, 10);
+                ctx.fill();
+                ctx.strokeStyle = '#45a29e';
+                ctx.lineWidth = 2;
+                ctx.stroke();
+
+                ctx.fillStyle = '#c5c6c7';
+                ctx.font = '18px Arial';
+                ctx.textAlign = 'center';
+                ctx.fillText(this.hint, this.x + this.width / 2, this.y - 20);
+
+                ctx.font = 'bold 28px Courier New';
+                ctx.textAlign = 'left';
+                const typedPart = this.text.substring(0, this.typedIndex);
+                const untypedPart = this.text.substring(this.typedIndex);
+
+                ctx.fillStyle = '#66fcf1'; 
+                ctx.fillText(typedPart, this.x, this.y + 5);
+                
+                const typedWidth = ctx.measureText(typedPart).width;
+                ctx.fillStyle = '#ffffff'; 
+                ctx.fillText(untypedPart, this.x + typedWidth, this.y + 5);
+
+                ctx.restore();
+            }
+
+            update() {
+                this.y += this.speed;
+            }
+        }
+
+        class Particle {
+            constructor(x, y, color) {
+                this.x = x;
+                this.y = y;
+                this.vx = (Math.random() - 0.5) * 8;
+                this.vy = (Math.random() - 0.5) * 8;
+                this.life = 1;
+                this.color = color;
+                this.size = Math.random() * 5 + 2;
+            }
+            update() {
+                this.x += this.vx;
+                this.y += this.vy;
+                this.life -= 0.05;
+                this.size *= 0.95;
+            }
+            draw() {
+                ctx.save();
+                ctx.globalAlpha = this.life;
+                ctx.fillStyle = this.color;
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.restore();
+            }
+        }
+
+        class Laser {
+            constructor(targetX, targetY) {
+                this.x = canvas.width / 2;
+                this.y = canvas.height;
+                this.targetX = targetX;
+                this.targetY = targetY;
+                this.life = 1;
+            }
+            update() {
+                this.life -= 0.1;
+            }
+            draw() {
+                ctx.save();
+                ctx.globalAlpha = this.life;
+                ctx.strokeStyle = '#66fcf1';
+                ctx.lineWidth = 4;
+                ctx.beginPath();
+                ctx.moveTo(this.x, this.y);
+                ctx.lineTo(this.targetX, this.targetY);
+                ctx.stroke();
+                ctx.restore();
+            }
+        }
+
+        // --- Helper Functions ---
+        function createExplosion(x, y) {
+            for (let i = 0; i < 20; i++) {
+                particles.push(new Particle(x, y, '#66fcf1'));
+                particles.push(new Particle(x, y, '#e94560'));
+            }
+        }
+
+        function drawPlayerBase() {
+            ctx.fillStyle = '#1f2833';
+            ctx.beginPath();
+            ctx.arc(canvas.width / 2, canvas.height, 40, Math.PI, 0);
+            ctx.fill();
+            ctx.strokeStyle = '#45a29e';
+            ctx.lineWidth = 3;
+            ctx.stroke();
+            
+            ctx.fillStyle = '#66fcf1';
+            ctx.fillRect(canvas.width / 2 - 10, canvas.height - 50, 20, 30);
+        }
+
+        function drawBackground() {
+            ctx.fillStyle = '#ffffff';
+            stars.forEach(star => {
+                ctx.globalAlpha = Math.random() * 0.5 + 0.5; 
+                ctx.beginPath();
+                ctx.arc(star.x, star.y, star.size, 0, Math.PI * 2);
+                ctx.fill();
+                star.y += star.speed;
+                if (star.y > canvas.height) {
+                    star.y = 0;
+                    star.x = Math.random() * canvas.width;
+                }
+            });
+            ctx.globalAlpha = 1;
+        }
+
+        function resetGame() {
+            cancelAnimationFrame(animationId);
+            score = 0;
+            lives = 5;
+            gameTime = 0;
+            gameOver = false;
+            activeWords = [];
+            particles = [];
+            lasers = [];
+            targetedWord = null;
+            lastSpawnTime = performance.now(); // Reset spawn time
+            
+            scoreElement.innerText = score;
+            livesElement.innerText = lives;
+
+            animationId = requestAnimationFrame(gameLoop);
+        }
+
+        function endGame() {
+            gameOver = true;
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            ctx.fillStyle = '#e94560';
+            ctx.font = 'bold 60px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText('GAME OVER', canvas.width / 2, canvas.height / 2 - 20);
+            
+            ctx.fillStyle = '#ffffff';
+            ctx.font = '24px Arial';
+            ctx.fillText(`Final Score: ${score}`, canvas.width / 2, canvas.height / 2 + 30);
+            ctx.fillText('Click [Restart] above to play again!', canvas.width / 2, canvas.height / 2 + 70);
+        }
+
+        // --- Game Loop ---
+        let lastSpawnTime = 0;
+        
+        function gameLoop(timestamp) {
+            if (gameOver) return;
+
+            gameTime += 16; 
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            drawBackground();
+
+            // Word spawn interval affected by speed selection
+            let spawnInterval = 3000 / speedMultiplier;
+
+            if (timestamp - lastSpawnTime > spawnInterval) {
+                activeWords.push(new FallingWord());
+                lastSpawnTime = timestamp;
+            }
+
+            for (let i = activeWords.length - 1; i >= 0; i--) {
+                let word = activeWords[i];
+                word.update();
+                word.draw();
+
+                // Bottom collision (lose life)
+                if (word.y > canvas.height + 50) {
+                    activeWords.splice(i, 1);
+                    if (targetedWord === word) targetedWord = null;
+                    
+                    lives--;
+                    livesElement.innerText = lives;
+                    
+                    ctx.fillStyle = 'rgba(233, 69, 96, 0.3)';
+                    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+                    if (lives <= 0) {
+                        endGame();
+                        return; // Exit current loop when game is over
+                    }
+                }
+            }
+
+            for (let i = particles.length - 1; i >= 0; i--) {
+                particles[i].update();
+                particles[i].draw();
+                if (particles[i].life <= 0) particles.splice(i, 1);
+            }
+
+            for (let i = lasers.length - 1; i >= 0; i--) {
+                lasers[i].update();
+                lasers[i].draw();
+                if (lasers[i].life <= 0) lasers.splice(i, 1);
+            }
+
+            drawPlayerBase();
+
+            animationId = requestAnimationFrame(gameLoop);
+        }
+
+        // --- Input Listeners ---
+        window.addEventListener('keydown', (e) => {
+            if (gameOver) return;
+            
+            if (e.key.length !== 1 || !/[a-zA-Z\-]/.test(e.key)) return;
+
+            const key = e.key.toLowerCase();
+            
+            if (targetedWord) {
+                if (key === targetedWord.text[targetedWord.typedIndex]) {
+                    targetedWord.typedIndex++;
+                    
+                    if (targetedWord.typedIndex === targetedWord.text.length) {
+                        const targetX = targetedWord.x + targetedWord.width / 2;
+                        const targetY = targetedWord.y;
+
+                        lasers.push(new Laser(targetX, targetY));
+                        createExplosion(targetX, targetY);
+
+                        activeWords = activeWords.filter(w => w !== targetedWord);
+                        targetedWord = null;
+                        score += 10;
+                        scoreElement.innerText = score;
+                    }
+                } else {
+                    targetedWord.x += (Math.random() > 0.5 ? 5 : -5); 
+                }
+                return;
+            }
+
+            for (let word of activeWords) {
+                if (key === word.text[0]) {
+                    targetedWord = word;
+                    targetedWord.typedIndex = 1;
+                    break;
+                }
+            }
+        });
+
+        // Start Game
+        animationId = requestAnimationFrame(gameLoop);
+
+    </script>
 </body>
 </html>
